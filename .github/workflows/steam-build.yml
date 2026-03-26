@@ -22,7 +22,7 @@ jobs:
           token: ${{ secrets.SDK_TOKEN }}
           path: steam_sdk
 
-      - name: Install apt dependencies (From Official Script)
+      - name: Install apt dependencies
         run: |
           apt install git wget build-essential cmake meson autoconf automake libtool pkg-config ruby bison xxd zlib1g-dev libbz2-dev xorg-dev libgl1-mesa-dev libasound2-dev libpulse-dev -y
 
@@ -32,9 +32,9 @@ jobs:
           make
 
       - name: Build executable with Steam
+        shell: bash  # <--- FIXED: Prevents "source not found" error
         run: |
           source linux/vars.sh
-          # Pointing to the SDK folder we checked out in step 3
           meson setup build --bindir=. --prefix=$GITHUB_WORKSPACE/output -Dsteamworks_path=$PWD/steam_sdk
           cd build
           ninja
@@ -62,7 +62,7 @@ jobs:
           token: ${{ secrets.SDK_TOKEN }}
           path: steam_sdk
 
-      - name: Setup MSYS2 (Using Official Package List)
+      - name: Setup MSYS2
         uses: msys2/setup-msys2@v2
         with:
           msystem: mingw64
@@ -70,11 +70,20 @@ jobs:
             base-devel
             git
             ruby
+            vim
             mingw-w64-x86_64-cmake
             mingw-w64-x86_64-meson
             mingw-w64-x86_64-gcc
             mingw-w64-x86_64-autotools
             mingw-w64-x86_64-libtool
+
+      - name: Cache dependencies # <--- ADDED: Saves built libs for next time
+        uses: actions/cache@v4
+        with:
+          path: |
+            windows/build-mingw64
+            windows/downloads
+          key: win-${{ hashFiles('windows/Makefile') }}
 
       - name: Build dependencies
         shell: msys2 {0}
@@ -86,6 +95,8 @@ jobs:
         shell: msys2 {0}
         run: |
           source windows/vars.sh
+          # Remove build dir if it exists to avoid Meson conflicts
+          rm -rf build 
           meson setup build -Dsteamworks_path=$PWD/steam_sdk
           cd build
           ninja
