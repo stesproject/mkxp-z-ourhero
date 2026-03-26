@@ -41,6 +41,7 @@ jobs:
       - name: Build dependencies
         run: |
           cd linux
+          rm -rf downloads/x86_64/* # Clear all cached downloads to prevent Git conflicts
           make
 
       - name: Build executable
