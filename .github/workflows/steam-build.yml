@@ -1,4 +1,4 @@
-name: Steam Achievement Build (Definitive)
+name: Steam Achievement Build (Wiki-Approved)
 on: [push, workflow_dispatch]
 
 jobs:
@@ -39,24 +39,26 @@ jobs:
           cd linux
           make
 
-      - name: Build and Gather Linux Artifact
+      - name: Build and Package Linux (Loose Method)
         shell: bash
         run: |
-          chmod +x linux/install.sh
           source linux/vars.sh
+          chmod +x linux/install.sh
           rm -rf build
-          # Setup build with Steam path
-          meson setup build --bindir=. --prefix=$GITHUB_WORKSPACE/output -Dsteamworks_path=$PWD/steam_sdk
+          
+          # Wiki-recommended 'Loose' configuration for portable distribution
+          # Using a relative prefix folder named 'local' to avoid permission errors
+          meson setup build --bindir=. --prefix=$PWD/local -Dsteamworks_path=$PWD/steam_sdk
+          
           cd build
           ninja
-          ninja install
+          ninja install # Group everything into the 'local' folder
           
-          # Gather Ruby Standard Library (The 'batteries')
-          cd $GITHUB_WORKSPACE/output
-          cp -r $GITHUB_WORKSPACE/linux/build-x86_64/lib/ruby/3.1.0 .
-          mv ./3.1.0 ./stdlib
+          # Gather Ruby Standard Library (Required for game scripts)
+          cd ../local
+          cp -r $GITHUB_WORKSPACE/linux/build-x86_64/lib/ruby/3.1.0 ./stdlib
           
-          # Copy Steam API library directly to ensure it's there
+          # Copy Steam API library directly to ensure it is present
           mkdir -p lib
           cp $GITHUB_WORKSPACE/steam_sdk/redistributable_bin/linux64/libsteam_api.so ./lib/
 
@@ -64,7 +66,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: mkxp-z-linux-steamdeck
-          path: output/
+          path: local/
 
   build-windows:
     name: Windows (Intel x64)
@@ -121,21 +123,9 @@ jobs:
           ninja
           strip ./mkxp-z.exe
           
-          # Create a 'dist' folder for a clean zip
+          # Manually gather DLLs as suggested by Wiki
           mkdir -p dist
           cp ./mkxp-z.exe ./dist/
           cp ../steam_sdk/redistributable_bin/win64/steam_api64.dll ./dist/
           cp ../windows/build-mingw64/bin/x64-msvcrt-ruby310.dll ./dist/
-          cp -r ../windows/build-mingw64/lib/ruby/3.1.0 ./dist/
-          mv ./dist/3.1.0 ./dist/stdlib
-          cp /mingw64/bin/zlib1.dll ./dist/
-          
-          # Optional: Include base assets if they exist
-          [ -f ../mkxp.json ] && cp ../mkxp.json ./dist/
-          [ -d ../scripts ] && cp -r ../scripts ./dist/
-
-      - name: Upload Windows Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: mkxp-z-windows-intel
-          path: build/dist/
+          cp -r ../windows/build-mingw64/lib/ruby/
