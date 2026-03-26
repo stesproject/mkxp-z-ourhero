@@ -1,4 +1,4 @@
-name: Steam Achievement Build (Official Remix)
+name: Steam Achievement Build (Definitive)
 on: [push, workflow_dispatch]
 
 jobs:
@@ -22,23 +22,43 @@ jobs:
           token: ${{ secrets.SDK_TOKEN }}
           path: steam_sdk
 
+      - name: Cache Linux Dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            linux/build-x86_64
+            linux/downloads
+          key: lin-x86_64-${{ hashFiles('linux/Makefile') }}
+
       - name: Install apt dependencies
         run: |
-          apt install git wget build-essential cmake meson autoconf automake libtool pkg-config ruby bison xxd zlib1g-dev libbz2-dev xorg-dev libgl1-mesa-dev libasound2-dev libpulse-dev -y
+          apt install git wget build-essential cmake meson autoconf automake libtool pkg-config ruby bison xxd zlib1g-dev libbz2-dev xorg-dev libgl1-mesa-dev libasound2-dev libpulse-dev patchelf -y
 
       - name: Build dependencies
         run: |
           cd linux
           make
 
-      - name: Build executable with Steam
-        shell: bash  # <--- FIXED: Prevents "source not found" error
+      - name: Build and Gather Linux Artifact
+        shell: bash
         run: |
+          chmod +x linux/install.sh
           source linux/vars.sh
+          rm -rf build
+          # Setup build with Steam path
           meson setup build --bindir=. --prefix=$GITHUB_WORKSPACE/output -Dsteamworks_path=$PWD/steam_sdk
           cd build
           ninja
           ninja install
+          
+          # Gather Ruby Standard Library (The 'batteries')
+          cd $GITHUB_WORKSPACE/output
+          cp -r $GITHUB_WORKSPACE/linux/build-x86_64/lib/ruby/3.1.0 .
+          mv ./3.1.0 ./stdlib
+          
+          # Copy Steam API library directly to ensure it's there
+          mkdir -p lib
+          cp $GITHUB_WORKSPACE/steam_sdk/redistributable_bin/linux64/libsteam_api.so ./lib/
 
       - name: Upload Linux Artifact
         uses: actions/upload-artifact@v4
@@ -77,7 +97,7 @@ jobs:
             mingw-w64-x86_64-autotools
             mingw-w64-x86_64-libtool
 
-      - name: Cache dependencies # <--- ADDED: Saves built libs for next time
+      - name: Cache Windows Dependencies
         uses: actions/cache@v4
         with:
           path: |
@@ -91,19 +111,31 @@ jobs:
           cd windows
           make
 
-      - name: Build exe with Steam
+      - name: Build and Gather Windows Artifact
         shell: msys2 {0}
         run: |
           source windows/vars.sh
-          # Remove build dir if it exists to avoid Meson conflicts
           rm -rf build 
           meson setup build -Dsteamworks_path=$PWD/steam_sdk
           cd build
           ninja
           strip ./mkxp-z.exe
+          
+          # Create a 'dist' folder for a clean zip
+          mkdir -p dist
+          cp ./mkxp-z.exe ./dist/
+          cp ../steam_sdk/redistributable_bin/win64/steam_api64.dll ./dist/
+          cp ../windows/build-mingw64/bin/x64-msvcrt-ruby310.dll ./dist/
+          cp -r ../windows/build-mingw64/lib/ruby/3.1.0 ./dist/
+          mv ./dist/3.1.0 ./dist/stdlib
+          cp /mingw64/bin/zlib1.dll ./dist/
+          
+          # Optional: Include base assets if they exist
+          [ -f ../mkxp.json ] && cp ../mkxp.json ./dist/
+          [ -d ../scripts ] && cp -r ../scripts ./dist/
 
       - name: Upload Windows Artifact
         uses: actions/upload-artifact@v4
         with:
           name: mkxp-z-windows-intel
-          path: build/mkxp-z.exe
+          path: build/dist/
