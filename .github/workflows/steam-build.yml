@@ -1,0 +1,89 @@
+name: Steam Achievement Build
+on: [push, workflow_dispatch]
+
+jobs:
+  build-linux:
+    name: Linux (Steam Deck)
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    steps:
+      - name: Checkout mkxp-z
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Checkout Private Steam SDK
+        uses: actions/checkout@v5
+        with:
+          repository: stesproject/steam-sdk
+          token: ${{ secrets.SDK_TOKEN }}
+          path: steam_sdk
+
+      - name: Install apt dependencies
+        run: |
+          apt update
+          apt install git wget build-essential cmake meson autoconf automake libtool pkg-config ruby bison xxd zlib1g-dev libbz2-dev xorg-dev libgl1-mesa-dev libasound2-dev libpulse-dev -y
+
+      - name: Build all dependencies (SDL2, PhysFS, etc)
+        run: |
+          cd linux
+          make
+
+      - name: Build executable with Steam
+        run: |
+          source linux/vars.sh
+          # Linking the SDK from the 'steam_sdk' folder checked out above
+          meson setup build --bindir=. --prefix=$GITHUB_WORKSPACE/output -Dsteamworks_path=$PWD/steam_sdk
+          cd build
+          ninja
+          ninja install
+
+      - name: Upload Linux Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mkxp-z-linux-steamdeck
+          path: output/
+
+  build-windows:
+    name: Windows (Intel x64)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout mkxp-z
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Checkout Private Steam SDK
+        uses: actions/checkout@v5
+        with:
+          repository: stesproject/steam-sdk
+          token: ${{ secrets.SDK_TOKEN }}
+          path: steam_sdk
+
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: mingw64
+          install: base-devel git ruby mingw-w64-x86_64-cmake mingw-w64-x86_64-meson mingw-w64-x86_64-gcc
+
+      - name: Build all dependencies
+        shell: msys2 {0}
+        run: |
+          cd windows
+          make
+
+      - name: Build exe with Steam
+        shell: msys2 {0}
+        run: |
+          source windows/vars.sh
+          # Linking the SDK for Windows
+          meson setup build -Dsteamworks_path=$PWD/steam_sdk
+          cd build
+          ninja
+          strip ./mkxp-z.exe
+
+      - name: Upload Windows Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mkxp-z-windows-intel
+          path: build/mkxp-z.exe
