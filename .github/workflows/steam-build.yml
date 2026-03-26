@@ -1,4 +1,4 @@
-name: Steam Achievement Build (Final Sync)
+name: Steam Achievement Build (Final Production)
 on: [push, workflow_dispatch]
 
 jobs:
@@ -46,41 +46,40 @@ jobs:
       - name: Build executable
         run: |
           source linux/vars.sh
-          # Matches original: prefix points to build/local
           meson setup build --bindir=. --prefix=$GITHUB_WORKSPACE/build/local -Dsteamworks_path=$PWD/steam_sdk
           cd build
-          # We run ninja but skip 'ninja install' if it keeps failing, 
-          # or try it once more now that paths are identical to original.
           ninja
-          ninja install || echo "Install script failed, continuing to manual prepare"
 
       - name: Prepare archive (Linux)
         run: |
-          # If ninja install failed, ensure the directory exists
           mkdir -p build/local/lib64
           
-          # Copy the Steam binary (overwriting the non-steam one if needed)
-          cp build/steam_mkxp-z.x86_64 build/local/mkxp-z || cp build/mkxp-z build/local/mkxp-z
+          # Prioritize the Steam-built binary, rename it to 'mkxp-z'
+          if [ -f build/steam_mkxp-z.x86_64 ]; then
+            cp build/steam_mkxp-z.x86_64 build/local/mkxp-z
+          else
+            cp build/mkxp-z build/local/mkxp-z
+          fi
           
-          # Copy Steam library into lib64 to match original structure
+          # Copy Steam library into lib64
           cp steam_sdk/redistributable_bin/linux64/libsteam_api.so build/local/lib64/
           
-          # Fix RPATH for the Steam library
-          patchelf --set-rpath '$ORIGIN/lib64' build/local/mkxp-z || true
+          # Fix the binary to look in lib64 for libraries
+          patchelf --set-rpath '$ORIGIN/lib64' build/local/mkxp-z
           
           cd build/local
-          # Match original autobuild paths exactly
+          # Gather Ruby and assets
           cp -r ../../linux/build-x86_64/lib/ruby/3.1.0 .
           mv ./3.1.0 ./stdlib
           cp ../../mkxp.json . 2>/dev/null || true
           cp -r ../../scripts . 2>/dev/null || true
-          # Grab other libs from linux/build if they exist (to fill lib64)
+          # Fill lib64 with dependency libraries
           cp ../../linux/build-x86_64/lib/*.so* ./lib64/ 2>/dev/null || true
 
       - name: Upload Linux Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mkxp-z-linux-steamdeck
+          name: OurHero-Linux-SteamDeck
           path: build/local
 
   build-windows:
@@ -128,7 +127,6 @@ jobs:
           meson setup build -Dsteamworks_path=$PWD/steam_sdk
           cd build
           ninja
-          strip ./mkxp-z.exe || strip ./steam_mkxp-z.exe
 
       - name: Prepare archive (Windows)
         shell: msys2 {0}
@@ -139,15 +137,21 @@ jobs:
           cp ../../windows/build-mingw64/bin/x64-msvcrt-ruby310.dll .
           cp -r ../../windows/build-mingw64/lib/ruby/3.1.0 .
           mv ./3.1.0 ./stdlib
-          # Copy Steam DLL
           cp ../../steam_sdk/redistributable_bin/win64/steam_api64.dll .
-          # Copy EXE (handling potential steam_ prefix)
-          cp ../steam_mkxp-z.exe ./mkxp-z.exe || cp ../mkxp-z.exe .
+          
+          # Prioritize Steam binary
+          if [ -f ../steam_mkxp-z.exe ]; then
+            cp ../steam_mkxp-z.exe ./mkxp-z.exe
+          else
+            cp ../mkxp-z.exe ./mkxp-z.exe
+          fi
+          strip ./mkxp-z.exe
+          
           cp ../../mkxp.json . 2>/dev/null || true
           cp -r ../../scripts . 2>/dev/null || true
 
       - name: Upload Windows Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mkxp-z-windows-intel
+          name: OurHero-Windows-Steam
           path: build/artifact
