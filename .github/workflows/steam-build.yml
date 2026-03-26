@@ -1,4 +1,4 @@
-name: Steam Achievement Build (Fixed)
+name: Steam Achievement Build (Final Sync)
 on: [push, workflow_dispatch]
 
 jobs:
@@ -6,6 +6,9 @@ jobs:
     name: Linux (Steam Deck)
     runs-on: ubuntu-latest
     container: debian:trixie
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Pre-install Git
         run: apt update && apt install -y git ca-certificates
@@ -28,10 +31,11 @@ jobs:
           path: |
             linux/build-x86_64
             linux/downloads
-          key: lin-x86_64-${{ hashFiles('linux/Makefile') }}
+          key: lin-debian-trixie-x86_64-${{ hashFiles('linux/Makefile') }}
 
       - name: Install apt dependencies
         run: |
+          apt update
           apt install git wget build-essential cmake meson autoconf automake libtool pkg-config ruby bison xxd zlib1g-dev libbz2-dev xorg-dev libgl1-mesa-dev libasound2-dev libpulse-dev patchelf -y
 
       - name: Build dependencies
@@ -39,38 +43,45 @@ jobs:
           cd linux
           make
 
-      - name: Build and Manual Gather (Linux)
-        shell: bash
+      - name: Build executable
         run: |
           source linux/vars.sh
-          rm -rf build
-          # Build only (avoiding the broken install script)
-          meson setup build -Dsteamworks_path=$PWD/steam_sdk
+          # Matches original: prefix points to build/local
+          meson setup build --bindir=. --prefix=$GITHUB_WORKSPACE/build/local -Dsteamworks_path=$PWD/steam_sdk
           cd build
+          # We run ninja but skip 'ninja install' if it keeps failing, 
+          # or try it once more now that paths are identical to original.
           ninja
+          ninja install || echo "Install script failed, continuing to manual prepare"
+
+      - name: Prepare archive (Linux)
+        run: |
+          # If ninja install failed, ensure the directory exists
+          mkdir -p build/local/lib64
           
-          # Manually create the portable structure
-          cd $GITHUB_WORKSPACE
-          mkdir -p output/lib
+          # Copy the Steam binary (overwriting the non-steam one if needed)
+          cp build/steam_mkxp-z.x86_64 build/local/mkxp-z || cp build/mkxp-z build/local/mkxp-z
           
-          # Find the steam version of the binary and copy it
-          cp build/steam_mkxp-z.x86_64 output/mkxp-z || cp build/mkxp-z output/mkxp-z
+          # Copy Steam library into lib64 to match original structure
+          cp steam_sdk/redistributable_bin/linux64/libsteam_api.so build/local/lib64/
           
-          # Copy Steam API and set the search path (RPATH)
-          cp steam_sdk/redistributable_bin/linux64/libsteam_api.so output/lib/
-          patchelf --set-rpath '$ORIGIN/lib' output/mkxp-z
+          # Fix RPATH for the Steam library
+          patchelf --set-rpath '$ORIGIN/lib64' build/local/mkxp-z || true
           
-          # Gather Ruby Standard Library
-          cp -r linux/build-x86_64/lib/ruby/3.1.0 output/stdlib
-          
-          # Copy configuration
-          [ -f mkxp.json ] && cp mkxp.json output/
+          cd build/local
+          # Match original autobuild paths exactly
+          cp -r ../../linux/build-x86_64/lib/ruby/3.1.0 .
+          mv ./3.1.0 ./stdlib
+          cp ../../mkxp.json . 2>/dev/null || true
+          cp -r ../../scripts . 2>/dev/null || true
+          # Grab other libs from linux/build if they exist (to fill lib64)
+          cp ../../linux/build-x86_64/lib/*.so* ./lib64/ 2>/dev/null || true
 
       - name: Upload Linux Artifact
         uses: actions/upload-artifact@v4
         with:
           name: mkxp-z-linux-steamdeck
-          path: output/
+          path: build/local
 
   build-windows:
     name: Windows (Intel x64)
@@ -93,15 +104,8 @@ jobs:
         with:
           msystem: mingw64
           install: >-
-            base-devel
-            git
-            ruby
-            vim
-            mingw-w64-x86_64-cmake
-            mingw-w64-x86_64-meson
-            mingw-w64-x86_64-gcc
-            mingw-w64-x86_64-autotools
-            mingw-w64-x86_64-libtool
+            base-devel git ruby vim mingw-w64-x86_64-cmake mingw-w64-x86_64-meson
+            mingw-w64-x86_64-gcc mingw-w64-x86_64-autotools mingw-w64-x86_64-libtool
 
       - name: Cache Windows Dependencies
         uses: actions/cache@v4
@@ -117,35 +121,33 @@ jobs:
           cd windows
           make
 
-      - name: Build and Gather Windows Artifact
+      - name: Build exe
         shell: msys2 {0}
         run: |
           source windows/vars.sh
-          rm -rf build 
           meson setup build -Dsteamworks_path=$PWD/steam_sdk
           cd build
           ninja
-          
-          # Create clean dist folder
-          mkdir -p dist
-          
-          # Copy the EXE (We use the 'steam' prefixed one)
-          cp steam_mkxp-z.exe dist/mkxp-z.exe || cp mkxp-z.exe dist/mkxp-z.exe
-          strip dist/mkxp-z.exe
-          
-          # Copy DLLs with absolute safety paths
-          cp ../steam_sdk/redistributable_bin/win64/steam_api64.dll dist/
-          cp ../windows/build-mingw64/bin/x64-msvcrt-ruby310.dll dist/
-          cp /mingw64/bin/zlib1.dll dist/
-          
-          # Copy Ruby Libs (Fixed Path)
-          cp -r ../windows/build-mingw64/lib/ruby/3.1.0 dist/stdlib
-          
-          # Copy Config
-          [ -f ../mkxp.json ] && cp ../mkxp.json dist/
+          strip ./mkxp-z.exe || strip ./steam_mkxp-z.exe
+
+      - name: Prepare archive (Windows)
+        shell: msys2 {0}
+        run: |
+          mkdir -p build/artifact
+          cd build/artifact
+          cp /mingw64/bin/zlib1.dll .
+          cp ../../windows/build-mingw64/bin/x64-msvcrt-ruby310.dll .
+          cp -r ../../windows/build-mingw64/lib/ruby/3.1.0 .
+          mv ./3.1.0 ./stdlib
+          # Copy Steam DLL
+          cp ../../steam_sdk/redistributable_bin/win64/steam_api64.dll .
+          # Copy EXE (handling potential steam_ prefix)
+          cp ../steam_mkxp-z.exe ./mkxp-z.exe || cp ../mkxp-z.exe .
+          cp ../../mkxp.json . 2>/dev/null || true
+          cp -r ../../scripts . 2>/dev/null || true
 
       - name: Upload Windows Artifact
         uses: actions/upload-artifact@v4
         with:
           name: mkxp-z-windows-intel
-          path: build/dist/
+          path: build/artifact
