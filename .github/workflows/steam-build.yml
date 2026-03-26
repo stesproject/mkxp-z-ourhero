@@ -1,41 +1,44 @@
-name: Steam Achievement Build
+name: Steam Achievement Build (Official Remix)
 on: [push, workflow_dispatch]
 
 jobs:
   build-linux:
     name: Linux (Steam Deck)
     runs-on: ubuntu-latest
-    # We moved the container declaration down to the steps to ensure Git is available
+    container: debian:trixie
     steps:
-      - name: Install Git on Runner
-        run: sudo apt-get install -y git
+      - name: Pre-install Git
+        run: apt update && apt install -y git ca-certificates
 
       - name: Checkout mkxp-z
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           submodules: recursive
-          fetch-depth: 0
 
-      - name: Run Build in Debian Container
-        uses: addnab/docker-run-action@v3
+      - name: Checkout Private Steam SDK
+        uses: actions/checkout@v5
         with:
-          image: debian:trixie
-          options: -v ${{ github.workspace }}:/work
-          run: |
-            apt update
-            apt install git wget build-essential cmake meson autoconf automake libtool pkg-config ruby bison xxd zlib1g-dev libbz2-dev xorg-dev libgl1-mesa-dev libasound2-dev libpulse-dev -y
-            
-            # Now we pull the Private SDK inside the container manually
-            git clone https://${{ secrets.SDK_TOKEN }}@github.com/stesproject/steam-sdk.git /work/steam_sdk
-            
-            cd /work/linux
-            make
-            cd ..
-            # Manual source and build since we are in a raw shell
-            export PATH="/work/linux/build-x86_64/bin:$PATH"
-            export PKG_CONFIG_PATH="/work/linux/build-x86_64/lib/pkgconfig"
-            meson setup build --bindir=. --prefix=/work/output -Dsteamworks_path=/work/steam_sdk
-            ninja -C build install
+          repository: stesproject/steam-sdk
+          token: ${{ secrets.SDK_TOKEN }}
+          path: steam_sdk
+
+      - name: Install apt dependencies (From Official Script)
+        run: |
+          apt install git wget build-essential cmake meson autoconf automake libtool pkg-config ruby bison xxd zlib1g-dev libbz2-dev xorg-dev libgl1-mesa-dev libasound2-dev libpulse-dev -y
+
+      - name: Build dependencies
+        run: |
+          cd linux
+          make
+
+      - name: Build executable with Steam
+        run: |
+          source linux/vars.sh
+          # Pointing to the SDK folder we checked out in step 3
+          meson setup build --bindir=. --prefix=$GITHUB_WORKSPACE/output -Dsteamworks_path=$PWD/steam_sdk
+          cd build
+          ninja
+          ninja install
 
       - name: Upload Linux Artifact
         uses: actions/upload-artifact@v4
@@ -48,22 +51,21 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Checkout mkxp-z
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           submodules: recursive
 
       - name: Checkout Private Steam SDK
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: stesproject/steam-sdk
           token: ${{ secrets.SDK_TOKEN }}
           path: steam_sdk
 
-      - name: Setup MSYS2
+      - name: Setup MSYS2 (Using Official Package List)
         uses: msys2/setup-msys2@v2
         with:
           msystem: mingw64
-          # ADDED autotools and autoconf here
           install: >-
             base-devel
             git
@@ -74,7 +76,7 @@ jobs:
             mingw-w64-x86_64-autotools
             mingw-w64-x86_64-libtool
 
-      - name: Build all dependencies
+      - name: Build dependencies
         shell: msys2 {0}
         run: |
           cd windows
