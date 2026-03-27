@@ -61,7 +61,7 @@ jobs:
         shell: msys2 {0}
         run: |
           source windows/vars.sh
-          meson setup build -Dsteamworks_path=$PWD/steam_sdk -Dsteam_appid=$STEAM_APPID
+          meson setup build -Denable-https=false -Dsteamworks_path=$PWD/steam_sdk -Dsteam_appid=$STEAM_APPID
           cd build
           ninja
           strip ./mkxp-z.exe
@@ -78,7 +78,6 @@ jobs:
           cp ../mkxp-z.exe .
           cp ../../mkxp.json .
           cp -r ../../scripts .
-          cp ../../assets/LICENSE.mkxp-z-with-https.txt .
           # Copy Steamworks DLL
           cp ../../steam_sdk/redistributable_bin/win64/steam_api64.dll .
 
@@ -155,23 +154,22 @@ jobs:
       - name: Build executable
         run: |
           source linux/vars.sh
-          meson setup build --bindir=. --prefix=$GITHUB_WORKSPACE/build/local -Dsteamworks_path=$PWD/steam_sdk -Dsteam_appid=$STEAM_APPID
+          meson setup build --bindir=. --prefix=$GITHUB_WORKSPACE/build/local/usr -Denable-https=false -Dsteamworks_path=$PWD/steam_sdk -Dsteam_appid=$STEAM_APPID
           cd build
           ninja
           ninja install
 
       - name: Prepare archive
         run: |
-          cd build/local
-          cp -r ../../linux/build-x86_64/lib/ruby/3.1.0 .
+          cd build/local/usr
+          cp -r ../../../linux/build-x86_64/lib/ruby/3.1.0 .
           mv ./3.1.0 ./stdlib
-          cp ../../mkxp.json .
-          cp -r ../../scripts .
-          cp ../../assets/LICENSE.mkxp-z-with-https.txt .
+          cp ../../../mkxp.json .
+          cp -r ../../../scripts .
           # Copy Steamworks .so
-          cp ../../steam_sdk/redistributable_bin/linux64/libsteam_api.so .
+          cp ../../../steam_sdk/redistributable_bin/linux64/libsteam_api.so .
 
       - uses: actions/upload-artifact@v4
         with:
           name: mkxp-z.linux.ubuntu.22.04.x86_64.${{github.event_name == 'pull_request' && format('PR{0}', github.event.number) || github.ref_name}}-${{steps.short-sha.outputs.sha}}
-          path: build/local
+          path: build/local/usr
