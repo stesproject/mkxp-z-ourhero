@@ -3,10 +3,10 @@ name: Steam Build
 on:
   push:
     branches: ['dev', 'autobuild']
-    paths-ignore: ['*.md', ['*.json'], ['*.png']]
+    paths-ignore: ['*.md', '*.json', '*.png']
   pull_request:
     branches: ['dev', 'autobuild']
-    paths-ignore: ['*.md', ['*.json'], ['*.png']]
+    paths-ignore: ['*.md', '*.json', '*.png']
 
 env:
   STEAM_APPID: 847560
