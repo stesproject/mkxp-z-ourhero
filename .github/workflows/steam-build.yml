@@ -65,7 +65,7 @@ jobs:
         shell: msys2 {0}
         run: |
           source windows/vars.sh
-          meson setup build -Dsteamworks_path=../steam_sdk -Dsteam_appid=$STEAM_APPID -Denable-https=false
+          meson setup build -Dsteamworks_path=$PWD/steam_sdk -Dsteam_appid=$STEAM_APPID -Denable-https=false
           cd build
           ninja
           strip ./mkxp-z.exe
@@ -162,7 +162,7 @@ jobs:
       - name: Build executable
         run: |
           source linux/vars.sh
-          meson setup build --bindir=. --prefix=$GITHUB_WORKSPACE/build/local -Dsteamworks_path=steam_sdk -Dsteam_appid=$STEAM_APPID -Denable-https=false
+          meson setup build --bindir=. --prefix=$GITHUB_WORKSPACE/build/local -Dsteamworks_path=$PWD/steam_sdk -Dsteam_appid=$STEAM_APPID -Denable-https=false
           cd build
           ninja
           ninja install || true
