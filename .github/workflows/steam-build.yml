@@ -1,121 +1,57 @@
-name: Steam Achievement Build (Final Production)
-on: [push, workflow_dispatch]
+name: Steam Build
+
+on:
+  push:
+    branches: ['dev', 'autobuild']
+    paths-ignore: ['*.md', '*.json', '*.png']
+  pull_request:
+    branches: ['dev', 'autobuild']
+    paths-ignore: ['*.md', '*.json', '*.png']
+
+env:
+  STEAM_APPID: 847560
 
 jobs:
-  build-linux:
-    name: Linux (Steam Deck)
-    runs-on: ubuntu-latest
-    container: debian:trixie
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - name: Pre-install Git
-        run: apt update && apt install -y git ca-certificates
-
-      - name: Checkout mkxp-z
-        uses: actions/checkout@v5
-        with:
-          submodules: recursive
-
-      - name: Checkout Private Steam SDK
-        uses: actions/checkout@v5
-        with:
-          repository: stesproject/steam-sdk
-          token: ${{ secrets.SDK_TOKEN }}
-          path: steam_sdk
-
-      - name: Cache Linux Dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            linux/build-x86_64
-            linux/downloads
-          key: lin-debian-trixie-x86_64-${{ hashFiles('linux/Makefile') }}
-
-      - name: Install apt dependencies
-        run: |
-          apt update
-          apt install git wget build-essential cmake meson autoconf automake libtool pkg-config ruby bison xxd zlib1g-dev libbz2-dev xorg-dev libgl1-mesa-dev libasound2-dev libpulse-dev patchelf -y
-
-      - name: Build dependencies
-        run: |
-          cd linux
-          rm -rf downloads/x86_64/* # Clear all cached downloads to prevent Git conflicts
-          make
-
-      - name: Build executable
-        run: |
-          source linux/vars.sh
-          meson setup build --bindir=. --prefix=$GITHUB_WORKSPACE/build/local -Dsteamworks_path=$PWD/steam_sdk
-          cd build
-          ninja
-
-      - name: Prepare archive (Linux)
-        run: |
-          mkdir -p build/local/lib64
-          
-          # Prioritize the Steam-built binary, rename it to 'mkxp-z'
-          if [ -f build/steam_mkxp-z.x86_64 ]; then
-            cp build/steam_mkxp-z.x86_64 build/local/mkxp-z
-          else
-            cp build/mkxp-z build/local/mkxp-z
-          fi
-          
-          # Copy Steam library into lib64
-          cp steam_sdk/redistributable_bin/linux64/libsteam_api.so build/local/lib64/
-          
-          # Fix the binary to look in lib64 for libraries
-          patchelf --set-rpath '$ORIGIN/lib64' build/local/mkxp-z
-          
-          cd build/local
-          # Gather Ruby and assets
-          cp -r ../../linux/build-x86_64/lib/ruby/3.1.0 .
-          mv ./3.1.0 ./stdlib
-          cp ../../mkxp.json . 2>/dev/null || true
-          cp -r ../../scripts . 2>/dev/null || true
-          # Fill lib64 with dependency libraries
-          cp ../../linux/build-x86_64/lib/*.so* ./lib64/ 2>/dev/null || true
-
-      - name: Upload Linux Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: OurHero-Linux-SteamDeck
-          path: build/local
-
   build-windows:
-    name: Windows (Intel x64)
+    name: Windows
     runs-on: windows-latest
     steps:
-      - name: Checkout mkxp-z
-        uses: actions/checkout@v5
+      - uses: benjlevesque/short-sha@v2.2
+        id: short-sha
         with:
-          submodules: recursive
+          length: 7
 
-      - name: Checkout Private Steam SDK
-        uses: actions/checkout@v5
-        with:
-          repository: stesproject/steam-sdk
-          token: ${{ secrets.SDK_TOKEN }}
-          path: steam_sdk
-
-      - name: Setup MSYS2
-        uses: msys2/setup-msys2@v2
+      - uses: msys2/setup-msys2@v2
         with:
           msystem: mingw64
           install: >-
-            base-devel git ruby vim mingw-w64-x86_64-cmake mingw-w64-x86_64-meson
-            mingw-w64-x86_64-gcc mingw-w64-x86_64-autotools mingw-w64-x86_64-libtool
+            base-devel
+            git
+            ruby
+            vim
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-meson
+            mingw-w64-x86_64-autotools
+            mingw-w64-x86_64-gcc
 
-      - name: Cache Windows Dependencies
-        uses: actions/cache@v4
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Checkout Private Steam SDK
+        uses: actions/checkout@v5
+        with:
+          repository: stesproject/steam-sdk
+          token: ${{ secrets.SDK_TOKEN }}
+          path: steam_sdk
+
+      - uses: actions/cache@v4
         with:
           path: |
             windows/build-mingw64
             windows/downloads
           key: win-${{ hashFiles('windows/Makefile') }}
 
-      - name: Build dependencies
+      - name: Build all dependencies
         shell: msys2 {0}
         run: |
           cd windows
@@ -125,11 +61,12 @@ jobs:
         shell: msys2 {0}
         run: |
           source windows/vars.sh
-          meson setup build -Dsteamworks_path=$PWD/steam_sdk
+          meson setup build -Dsteamworks_path=$PWD/steam_sdk -Dsteam_appid=$STEAM_APPID
           cd build
           ninja
+          strip ./mkxp-z.exe
 
-      - name: Prepare archive (Windows)
+      - name: Prepare archive
         shell: msys2 {0}
         run: |
           mkdir -p build/artifact
@@ -138,21 +75,103 @@ jobs:
           cp ../../windows/build-mingw64/bin/x64-msvcrt-ruby310.dll .
           cp -r ../../windows/build-mingw64/lib/ruby/3.1.0 .
           mv ./3.1.0 ./stdlib
+          cp ../mkxp-z.exe .
+          cp ../../mkxp.json .
+          cp -r ../../scripts .
+          cp ../../assets/LICENSE.mkxp-z-with-https.txt .
+          # Copy Steamworks DLL
           cp ../../steam_sdk/redistributable_bin/win64/steam_api64.dll .
-          
-          # Prioritize Steam binary
-          if [ -f ../steam_mkxp-z.exe ]; then
-            cp ../steam_mkxp-z.exe ./mkxp-z.exe
-          else
-            cp ../mkxp-z.exe ./mkxp-z.exe
-          fi
-          strip ./mkxp-z.exe
-          
-          cp ../../mkxp.json . 2>/dev/null || true
-          cp -r ../../scripts . 2>/dev/null || true
 
-      - name: Upload Windows Artifact
-        uses: actions/upload-artifact@v4
+      - name: Check for DLLs missing from the artifact
+        shell: msys2 {0}
+        run: |
+          cd build/artifact
+          error_flag=
+
+          for file in *.exe *.dll
+          do
+            ldd_output="$(ldd "$file")"
+            echo "$file"
+            echo "$ldd_output"
+
+            while IFS= read -r line
+            do
+              dll_name="$(echo "$line" | sed -e 's/=>/|/g' | cut -d '|' -f 1 | sed -e 's/^[ \t]*//g' -e 's/[ \t]*$//g')"
+              dll_location="$(echo "$line" | sed -e 's/=>/|/g' | cut -d '|' -f 2 | sed -e 's/^[ \t]*//g' -e 's/[ \t]*$//g')"
+              if [[ "$dll_location" = 'not found'* ]] || [[ "$dll_location" = '/mingw64/bin/'* ]] || [[ "$dll_location" = '/mingw64/lib/'* ]] || [[ "$dll_location" = '/mingw64/usr/bin/'* ]] || [[ "$dll_location" = '/mingw64/usr/lib/'* ]]
+              then
+                error_flag=1
+                echo "::error::$dll_name is missing from the artifact"
+              fi
+            done <<< "$ldd_output"
+          done
+
+          if [ -n "$error_flag" ]
+          then
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
         with:
-          name: OurHero-Windows-Steam
+          name: mkxp-z.windows.${{github.event_name == 'pull_request' && format('PR{0}', github.event.number) || github.ref_name}}-${{steps.short-sha.outputs.sha}}
           path: build/artifact
+
+  build-linux-native:
+    name: Ubuntu 22.04 x86_64
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: benjlevesque/short-sha@v2.2
+        id: short-sha
+        with:
+          length: 7
+
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Checkout Private Steam SDK
+        uses: actions/checkout@v5
+        with:
+          repository: stesproject/steam-sdk
+          token: ${{ secrets.SDK_TOKEN }}
+          path: steam_sdk
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            linux/build-x86_64
+            linux/downloads
+          key: lin-x86_64-${{ hashFiles('linux/Makefile') }}
+
+      - name: Install apt dependencies
+        run: |
+          sudo apt update
+          sudo apt install git wget build-essential cmake meson autoconf automake libtool pkg-config ruby bison xxd zlib1g-dev libbz2-dev xorg-dev libgl1-mesa-dev libasound2-dev libpulse-dev -y
+
+      - name: Build everything else
+        run: |
+          cd linux
+          make
+
+      - name: Build executable
+        run: |
+          source linux/vars.sh
+          meson setup build --bindir=. --prefix=$GITHUB_WORKSPACE/build/local -Dsteamworks_path=$PWD/steam_sdk -Dsteam_appid=$STEAM_APPID
+          cd build
+          ninja
+          ninja install
+
+      - name: Prepare archive
+        run: |
+          cd build/local
+          cp -r ../../linux/build-x86_64/lib/ruby/3.1.0 .
+          mv ./3.1.0 ./stdlib
+          cp ../../mkxp.json .
+          cp -r ../../scripts .
+          cp ../../assets/LICENSE.mkxp-z-with-https.txt .
+          # Copy Steamworks .so
+          cp ../../steam_sdk/redistributable_bin/linux64/libsteam_api.so .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mkxp-z.linux.ubuntu.22.04.x86_64.${{github.event_name == 'pull_request' && format('PR{0}', github.event.number) || github.ref_name}}-${{steps.short-sha.outputs.sha}}
+          path: build/local
