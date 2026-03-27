@@ -51,6 +51,10 @@ jobs:
             windows/downloads
           key: win-${{ hashFiles('windows/Makefile') }}
 
+      - name: Clear Windows Cache
+        shell: msys2 {0}
+        run: rm -rf windows/build-mingw64 windows/downloads
+        
       - name: Build all dependencies
         shell: msys2 {0}
         run: |
@@ -146,6 +150,9 @@ jobs:
         run: |
           sudo apt update
           sudo apt install git wget build-essential cmake meson autoconf automake libtool pkg-config ruby bison xxd zlib1g-dev libbz2-dev xorg-dev libgl1-mesa-dev libasound2-dev libpulse-dev -y
+
+      - name: Clear Linux Cache
+        run: rm -rf linux/build-x86_64 linux/downloads
 
       - name: Build everything else
         run: |
