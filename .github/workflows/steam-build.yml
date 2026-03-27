@@ -115,6 +115,8 @@ jobs:
       - name: Build everything else
         run: |
           cd linux
+          # FIX: Clear the broken dbus download folder before starting
+          rm -rf downloads/x86_64/dbus
           make
 
       - name: Build executable
