@@ -50,10 +50,6 @@ jobs:
             windows/build-mingw64
             windows/downloads
           key: win-${{ hashFiles('windows/Makefile') }}
-
-      - name: Clear Windows Cache
-        shell: msys2 {0}
-        run: rm -rf windows/build-mingw64 windows/downloads
         
       - name: Build all dependencies
         shell: msys2 {0}
@@ -82,7 +78,6 @@ jobs:
           cp ../mkxp-z.exe .
           cp ../../mkxp.json .
           cp -r ../../scripts .
-          cp ../../assets/LICENSE.mkxp-z-with-https.txt .
           cp ../../steam_sdk/redistributable_bin/win64/steam_api64.dll .
           echo $STEAM_APPID > steam_appid.txt
 
@@ -117,7 +112,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: mkxp-z.windows.${{github.event_name == 'pull_request' && format('PR{0}', github.event.number) || github.ref_name}}-${{steps.short-sha.outputs.sha}}
+          name: mkxp-z.windows
           path: build/artifact
 
   build-linux-native:
@@ -151,9 +146,6 @@ jobs:
           sudo apt update
           sudo apt install git wget build-essential cmake meson autoconf automake libtool pkg-config ruby bison xxd zlib1g-dev libbz2-dev xorg-dev libgl1-mesa-dev libasound2-dev libpulse-dev -y
 
-      - name: Clear Linux Cache
-        run: rm -rf linux/build-x86_64 linux/downloads
-
       - name: Build everything else
         run: |
           cd linux
@@ -162,7 +154,12 @@ jobs:
       - name: Build executable
         run: |
           source linux/vars.sh
-          meson setup build --bindir=. --prefix=$GITHUB_WORKSPACE/build/local -Dsteamworks_path=$PWD/steam_sdk -Dsteam_appid=$STEAM_APPID -Denable-https=false
+          # Add rpath to look for libraries in the same directory as the executable
+          meson setup build --bindir=. --prefix=$GITHUB_WORKSPACE/build/local \
+            -Dsteamworks_path="$PWD/steam_sdk" \
+            -Dsteam_appid=$STEAM_APPID \
+            -Denable-https=false \
+            -Dc_args='-Wl,-rpath=\$$ORIGIN'
           cd build
           ninja
           ninja install || true
@@ -176,6 +173,12 @@ jobs:
           cp -r ../../scripts .
           cp ../../steam_sdk/redistributable_bin/linux64/libsteam_api.so .
           echo $STEAM_APPID > steam_appid.txt
+          # Optional: Create a wrapper script to set LD_LIBRARY_PATH as fallback
+          echo '#!/bin/bash' > run.sh
+          echo 'DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"' >> run.sh
+          echo 'export LD_LIBRARY_PATH="$DIR:$LD_LIBRARY_PATH"' >> run.sh
+          echo 'exec "$DIR/mkxp-z" "$@"' >> run.sh
+          chmod +x run.sh
 
       - uses: actions/upload-artifact@v4
         with:
