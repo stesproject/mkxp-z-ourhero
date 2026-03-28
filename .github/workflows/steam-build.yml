@@ -157,7 +157,7 @@ jobs:
           meson setup build --bindir=. --prefix=$GITHUB_WORKSPACE/build/local \
             -Dsteamworks_path="$GITHUB_WORKSPACE/steam_sdk" \
             -Dsteam_appid=$STEAM_APPID \
-            -Duse_https=false \
+            -Denable-https=false \
             -Dc_args='-Wl,-rpath=\$$ORIGIN'
           cd build
           ninja
