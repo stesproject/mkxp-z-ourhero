@@ -19,7 +19,7 @@ get_dep ruby
 get_dep libcrypt
 get_dep libbsd
 
-if [ -n "$STEAM" ]; then
-  echo "Copying steam_api..."
-  cp "$STEAM/libsteam_api.so" "${MESON_INSTALL_PREFIX}/usr/lib"
-fi
+# if [ -n "$STEAM" ]; then
+#   echo "Copying steam_api..."
+#   cp "$STEAM/libsteam_api.so" "${MESON_INSTALL_PREFIX}/usr/lib"
+# fi
