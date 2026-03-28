@@ -113,7 +113,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: mkxp-z.windows
+          name: mkxp-z.windows.${{github.event_name == 'pull_request' && format('PR{0}', github.event.number) || github.ref_name}}-${{steps.short-sha.outputs.sha}}
           path: build/artifact
 
   build-linux-native:
@@ -139,7 +139,6 @@ jobs:
         with:
           path: |
             linux/build-x86_64
-            linux/downloads
           key: lin-x86_64-${{ hashFiles('linux/Makefile') }}
 
       - name: Install apt dependencies
@@ -155,24 +154,60 @@ jobs:
       - name: Build executable
         run: |
           source linux/vars.sh
-          meson setup build --bindir=. --prefix=$GITHUB_WORKSPACE/build/local
-          cd build && ninja
-          meson configure -Dsteamworks_path=$GITHUB_WORKSPACE/steam_sdk -Dsteam_appid=$STEAM_APPID -Denable-https=false
-          ninja install
+          meson setup build --bindir=. --prefix=$GITHUB_WORKSPACE/build/local \
+            -Dsteamworks_path="$GITHUB_WORKSPACE/steam_sdk" \
+            -Dsteam_appid=$STEAM_APPID \
+            -Duse_https=false \
+            -Dc_args='-Wl,-rpath=\$$ORIGIN'
+          cd build
+          ninja
+          # Strip the executable - it might be named mkxp-z or steam_mkxp-z
+          if [ -f ./mkxp-z ]; then
+            strip ./mkxp-z
+          elif [ -f ./steam_mkxp-z ]; then
+            strip ./steam_mkxp-z
+          fi
 
       - name: Prepare archive
         run: |
+          # Create the target directory
+          mkdir -p build/local
           cd build/local
+
+          # Copy Ruby stdlib from the dependency build
           cp -r ../../linux/build-x86_64/lib/ruby/3.1.0 .
           mv ./3.1.0 ./stdlib
+
+          # Copy all other dependency libraries (except ruby, which is already handled)
+          # This ensures any required runtime libraries are present.
+          cp -r ../../linux/build-x86_64/lib/* . || true
+          rm -rf ./ruby  # remove duplicate if any
+
+          # Copy the executable - try both possible names
+          if [ -f ../mkxp-z ]; then
+            cp ../mkxp-z .
+          elif [ -f ../steam_mkxp-z ]; then
+            cp ../steam_mkxp-z ./mkxp-z
+          else
+            echo "::error::Executable not found"
+            exit 1
+          fi
+
+          # Copy configuration and scripts
           cp ../../mkxp.json .
           cp -r ../../scripts .
+
+          # Copy the Steamworks shared library
           cp ../../steam_sdk/redistributable_bin/linux64/libsteam_api.so .
-          echo $STEAM_APPID > steam_appid.txt
-          echo "Listing generated Windows files:"
-          ls -Rlh
+
+          # Create a wrapper script to set LD_LIBRARY_PATH as a fallback
+          echo '#!/bin/bash' > run.sh
+          echo 'DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"' >> run.sh
+          echo 'export LD_LIBRARY_PATH="$DIR:$DIR/lib:$LD_LIBRARY_PATH"' >> run.sh
+          echo 'exec "$DIR/mkxp-z" "$@"' >> run.sh
+          chmod +x run.sh
 
       - uses: actions/upload-artifact@v4
         with:
-          name: mkxp-z.linux.ubuntu
+          name: mkxp-z.linux.ubuntu.22.04.x86_64.${{github.event_name == 'pull_request' && format('PR{0}', github.event.number) || github.ref_name}}-${{steps.short-sha.outputs.sha}}
           path: build/local
