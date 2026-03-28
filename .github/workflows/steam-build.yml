@@ -50,7 +50,7 @@ jobs:
             windows/build-mingw64
             windows/downloads
           key: win-${{ hashFiles('windows/Makefile') }}
-        
+
       - name: Build all dependencies
         shell: msys2 {0}
         run: |
@@ -61,9 +61,8 @@ jobs:
         shell: msys2 {0}
         run: |
           source windows/vars.sh
-          meson setup build -Dsteamworks_path=$PWD/steam_sdk -Dsteam_appid=$STEAM_APPID -Denable-https=false
-          cd build
-          ninja
+          meson setup build -Dsteamworks_path=$GITHUB_WORKSPACE/steam_sdk -Dsteam_appid=$STEAM_APPID -Denable-https=false
+          cd build && ninja
           strip ./mkxp-z.exe
 
       - name: Prepare archive
@@ -80,6 +79,8 @@ jobs:
           cp -r ../../scripts .
           cp ../../steam_sdk/redistributable_bin/win64/steam_api64.dll .
           echo $STEAM_APPID > steam_appid.txt
+          echo "Listing generated Windows files:"
+          ls -Rlh
 
       - name: Check for DLLs missing from the artifact
         shell: msys2 {0}
@@ -154,15 +155,10 @@ jobs:
       - name: Build executable
         run: |
           source linux/vars.sh
-          # Add rpath to look for libraries in the same directory as the executable
-          meson setup build --bindir=. --prefix=$GITHUB_WORKSPACE/build/local \
-            -Dsteamworks_path="$PWD/steam_sdk" \
-            -Dsteam_appid=$STEAM_APPID \
-            -Denable-https=false \
-            -Dc_args='-Wl,-rpath=\$$ORIGIN'
-          cd build
-          ninja
-          ninja install || true
+          meson setup build --bindir=. --prefix=$GITHUB_WORKSPACE/build/local
+          cd build && ninja
+          meson configure -Dsteamworks_path=$GITHUB_WORKSPACE/steam_sdk -Dsteam_appid=$STEAM_APPID -Denable-https=false
+          ninja install
 
       - name: Prepare archive
         run: |
@@ -173,12 +169,8 @@ jobs:
           cp -r ../../scripts .
           cp ../../steam_sdk/redistributable_bin/linux64/libsteam_api.so .
           echo $STEAM_APPID > steam_appid.txt
-          # Optional: Create a wrapper script to set LD_LIBRARY_PATH as fallback
-          echo '#!/bin/bash' > run.sh
-          echo 'DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"' >> run.sh
-          echo 'export LD_LIBRARY_PATH="$DIR:$LD_LIBRARY_PATH"' >> run.sh
-          echo 'exec "$DIR/mkxp-z" "$@"' >> run.sh
-          chmod +x run.sh
+          echo "Listing generated Windows files:"
+          ls -Rlh
 
       - uses: actions/upload-artifact@v4
         with:
