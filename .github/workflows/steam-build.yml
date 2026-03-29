@@ -68,18 +68,36 @@ jobs:
       - name: Prepare archive
         shell: msys2 {0}
         run: |
-          mkdir build/artifact
+          mkdir -p build/artifact
+          
+          # 1. Copy EVERYTHING from the build folder (where the .exes are)
+          # We use -n (no-clobber) or just cp to get all files
+          cp build/*.exe build/artifact/ 2>/dev/null || true
+          cp build/*.dll build/artifact/ 2>/dev/null || true
+          
           cd build/artifact
-          cp /mingw64/bin/zlib1.dll .
+          
+          # 2. Copy the Steam API & Ruby DLL
+          cp ../../steam_sdk/redistributable_bin/win64/steam_api64.dll .
           cp ../../windows/build-mingw64/bin/x64-msvcrt-ruby310.dll .
+          
+          # 3. Copy Ruby Environment
           cp -r ../../windows/build-mingw64/lib/ruby/3.1.0 .
           mv ./3.1.0 ./stdlib
-          cp ../mkxp-z.exe .
+          
+          # 4. Copy MSYS2 Dependencies
+          cp /mingw64/bin/zlib1.dll .
+          cp /mingw64/bin/SDL2.dll .
+          cp /mingw64/bin/libpixman-1-0.dll .
+          cp /mingw64/bin/libexpat-1.dll .
+          
+          # 5. Assets
           cp ../../mkxp.json .
           cp -r ../../scripts .
-          cp ../../steam_sdk/redistributable_bin/win64/steam_api64.dll .
           echo $STEAM_APPID > steam_appid.txt
-          echo "Listing generated Windows files:"
+
+          # 6. List Files to verify
+          echo "--- WINDOWS COMPLETE ARTIFACT LIST ---"
           ls -Rlh
 
       - name: Check for DLLs missing from the artifact
@@ -170,42 +188,35 @@ jobs:
 
       - name: Prepare archive
         run: |
-          # Create the target directory
           mkdir -p build/local
+          
+          # 1. Copy EVERYTHING from the build folder
+          # On Linux, these usually don't have extensions, so we grab all files
+          find build -maxdepth 1 -type f -exec cp {} build/local/ \; 2>/dev/null || true
+          
           cd build/local
-
-          # Copy Ruby stdlib from the dependency build
-          cp -r ../../linux/build-x86_64/lib/ruby/3.1.0 .
-          mv ./3.1.0 ./stdlib
-
-          # Copy all other dependency libraries (except ruby, which is already handled)
-          # This ensures any required runtime libraries are present.
-          cp -r ../../linux/build-x86_64/lib/* . || true
-          rm -rf ./ruby  # remove duplicate if any
-
-          # Copy the executable - try both possible names
-          if [ -f ../mkxp-z ]; then
-            cp ../mkxp-z .
-          elif [ -f ../steam_mkxp-z ]; then
-            cp ../steam_mkxp-z ./mkxp-z
-          else
-            echo "::error::Executable not found"
-            exit 1
-          fi
-
-          # Copy configuration and scripts
+          chmod +x *
+          
+          # 2. Steam API & RPath Fix for all binaries found
+          cp ../../steam_sdk/redistributable_bin/linux64/libsteam_api.so .
+          
+          # Apply patchelf to every file that looks like an executable
+          for f in *; do
+            if [ -f "$f" ] && [ -x "$f" ]; then
+              patchelf --set-rpath '$ORIGIN' "$f" 2>/dev/null || true
+            fi
+          done
+          
+          # 3. Assets
+          mkdir -p stdlib
+          cp -r ../../linux/build-x86_64/lib/ruby/3.1.0/* ./stdlib/
           cp ../../mkxp.json .
           cp -r ../../scripts .
+          echo $STEAM_APPID > steam_appid.txt
 
-          # Copy the Steamworks shared library
-          cp ../../steam_sdk/redistributable_bin/linux64/libsteam_api.so .
-
-          # Create a wrapper script to set LD_LIBRARY_PATH as a fallback
-          echo '#!/bin/bash' > run.sh
-          echo 'DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"' >> run.sh
-          echo 'export LD_LIBRARY_PATH="$DIR:$DIR/lib:$LD_LIBRARY_PATH"' >> run.sh
-          echo 'exec "$DIR/mkxp-z" "$@"' >> run.sh
-          chmod +x run.sh
+          # 4. List Files to verify
+          echo "--- LINUX COMPLETE ARTIFACT LIST ---"
+          ls -Rlh
 
       - uses: actions/upload-artifact@v4
         with:
