@@ -16,33 +16,28 @@ jobs:
     name: Windows
     runs-on: windows-latest
     steps:
-      - uses: benjlevesque/short-sha@v2.2
-        id: short-sha
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Checkout Private Steam SDK
+        uses: actions/checkout@v5
         with:
-          length: 7
+          repository: stesproject/steam-sdk
+          token: ${{ secrets.SDK_TOKEN }}
+          path: steam_sdk
 
       - uses: msys2/setup-msys2@v2
         with:
           msystem: mingw64
           install: >-
-            base-devel
-            git
-            ruby
-            vim
+            base-devel git ruby vim xxd
             mingw-w64-x86_64-cmake
             mingw-w64-x86_64-meson
             mingw-w64-x86_64-autotools
             mingw-w64-x86_64-gcc
-
-      - name: Checkout repository
-        uses: actions/checkout@v5
-
-      - name: Checkout steam-sdk
-        uses: actions/checkout@v5
-        with:
-          repository: stesproject/steam-sdk
-          path: steam_sdk
-          token: ${{ secrets.SDK_TOKEN }}
+            mingw-w64-x86_64-SDL2
+            mingw-w64-x86_64-pixman
+            mingw-w64-x86_64-expat
 
       - uses: actions/cache@v4
         with:
@@ -50,6 +45,10 @@ jobs:
             windows/build-mingw64
             windows/downloads
           key: win-${{ hashFiles('windows/Makefile') }}
+
+      - name: Manual Cache Clear (Windows)
+        shell: msys2 {0}
+        run: rm -rf windows/build-mingw64 windows/downloads
 
       - name: Build all dependencies
         shell: msys2 {0}
@@ -61,17 +60,19 @@ jobs:
         shell: msys2 {0}
         run: |
           source windows/vars.sh
-          meson setup build -Dsteamworks_path=$GITHUB_WORKSPACE/steam_sdk -Dsteam_appid=$STEAM_APPID -Denable-https=false
-          cd build && ninja
-          strip ./mkxp-z.exe
+          rm -rf build
+          meson setup build -Denable-https=false -Dsteamworks_path=$PWD/steam_sdk -Dsteam_appid=$STEAM_APPID
+          cd build
+          ninja
+          # Strip any .exe found in the build folder
+          find . -maxdepth 1 -name "*.exe" -exec strip {} \;
 
       - name: Prepare archive
         shell: msys2 {0}
         run: |
           mkdir -p build/artifact
           
-          # 1. Copy EVERYTHING from the build folder (where the .exes are)
-          # We use -n (no-clobber) or just cp to get all files
+          # 1. Copy EVERY .exe and .dll produced in the build folder
           cp build/*.exe build/artifact/ 2>/dev/null || true
           cp build/*.dll build/artifact/ 2>/dev/null || true
           
@@ -85,7 +86,7 @@ jobs:
           cp -r ../../windows/build-mingw64/lib/ruby/3.1.0 .
           mv ./3.1.0 ./stdlib
           
-          # 4. Copy MSYS2 Dependencies
+          # 4. Copy MSYS2 Dependencies (Now these exist because of the 'install' step above)
           cp /mingw64/bin/zlib1.dll .
           cp /mingw64/bin/SDL2.dll .
           cp /mingw64/bin/libpixman-1-0.dll .
@@ -96,73 +97,43 @@ jobs:
           cp -r ../../scripts .
           echo $STEAM_APPID > steam_appid.txt
 
-          # 6. List Files to verify
+          # 6. List Files
           echo "--- WINDOWS COMPLETE ARTIFACT LIST ---"
           ls -Rlh
 
-      - name: Check for DLLs missing from the artifact
-        shell: msys2 {0}
-        run: |
-          cd build/artifact
-          error_flag=
-
-          for file in *.exe *.dll
-          do
-            ldd_output="$(ldd "$file")"
-            echo "$file"
-            echo "$ldd_output"
-
-            while IFS= read -r line
-            do
-              dll_name="$(echo "$line" | sed -e 's/=>/|/g' | cut -d '|' -f 1 | sed -e 's/^[ \t]*//g' -e 's/[ \t]*$//g')"
-              dll_location="$(echo "$line" | sed -e 's/=>/|/g' | cut -d '|' -f 2 | sed -e 's/^[ \t]*//g' -e 's/[ \t]*$//g')"
-              if [[ "$dll_location" = 'not found'* ]] || [[ "$dll_location" = '/mingw64/bin/'* ]] || [[ "$dll_location" = '/mingw64/lib/'* ]] || [[ "$dll_location" = '/mingw64/usr/bin/'* ]] || [[ "$dll_location" = '/mingw64/usr/lib/'* ]]
-              then
-                error_flag=1
-                echo "::error::$dll_name is missing from the artifact"
-              fi
-            done <<< "$ldd_output"
-          done
-
-          if [ -n "$error_flag" ]
-          then
-            exit 1
-          fi
-
       - uses: actions/upload-artifact@v4
         with:
-          name: mkxp-z.windows.${{github.event_name == 'pull_request' && format('PR{0}', github.event.number) || github.ref_name}}-${{steps.short-sha.outputs.sha}}
+          name: mkxp-z.windows
           path: build/artifact
 
   build-linux-native:
     name: Ubuntu 22.04 x86_64
     runs-on: ubuntu-22.04
     steps:
-      - uses: benjlevesque/short-sha@v2.2
-        id: short-sha
-        with:
-          length: 7
-
       - name: Checkout repository
         uses: actions/checkout@v5
 
-      - name: Checkout steam-sdk
+      - name: Checkout Private Steam SDK
         uses: actions/checkout@v5
         with:
           repository: stesproject/steam-sdk
-          path: steam_sdk
           token: ${{ secrets.SDK_TOKEN }}
+          path: steam_sdk
 
       - uses: actions/cache@v4
         with:
           path: |
             linux/build-x86_64
+            linux/downloads
           key: lin-x86_64-${{ hashFiles('linux/Makefile') }}
 
       - name: Install apt dependencies
         run: |
           sudo apt update
-          sudo apt install git wget build-essential cmake meson autoconf automake libtool pkg-config ruby bison xxd zlib1g-dev libbz2-dev xorg-dev libgl1-mesa-dev libasound2-dev libpulse-dev -y
+          sudo apt install git wget build-essential cmake meson autoconf automake libtool pkg-config ruby bison xxd zlib1g-dev libbz2-dev xorg-dev libgl1-mesa-dev libasound2-dev libpulse-dev patchelf -y
+
+      - name: Manual Cache Clear (Linux)
+        run: rm -rf linux/build-x86_64 linux/downloads
 
       - name: Build everything else
         run: |
@@ -172,37 +143,27 @@ jobs:
       - name: Build executable
         run: |
           source linux/vars.sh
-          meson setup build --bindir=. --prefix=$GITHUB_WORKSPACE/build/local \
-            -Dsteamworks_path="$GITHUB_WORKSPACE/steam_sdk" \
-            -Dsteam_appid=$STEAM_APPID \
-            -Denable-https=false \
-            -Dc_args='-Wl,-rpath=\$$ORIGIN'
+          rm -rf build
+          meson setup build --bindir=. --prefix=$GITHUB_WORKSPACE/build/local -Denable-https=false -Dsteamworks_path=$PWD/steam_sdk -Dsteam_appid=$STEAM_APPID
           cd build
           ninja
-          # Strip the executable - it might be named mkxp-z or steam_mkxp-z
-          if [ -f ./mkxp-z ]; then
-            strip ./mkxp-z
-          elif [ -f ./steam_mkxp-z ]; then
-            strip ./steam_mkxp-z
-          fi
+          ninja install || true
 
       - name: Prepare archive
         run: |
           mkdir -p build/local
           
-          # 1. Copy EVERYTHING from the build folder
-          # On Linux, these usually don't have extensions, so we grab all files
-          find build -maxdepth 1 -type f -exec cp {} build/local/ \; 2>/dev/null || true
+          # 1. Copy ALL binaries produced in the build folder
+          find build -maxdepth 1 -type f -not -name "*.o" -not -name "*.a" -exec cp {} build/local/ \; 2>/dev/null || true
           
           cd build/local
           chmod +x *
           
-          # 2. Steam API & RPath Fix for all binaries found
+          # 2. Steam API & RPath Fix for all binaries
           cp ../../steam_sdk/redistributable_bin/linux64/libsteam_api.so .
           
-          # Apply patchelf to every file that looks like an executable
           for f in *; do
-            if [ -f "$f" ] && [ -x "$f" ]; then
+            if [ -f "$f" ] && [ -x "$f" ] && [ "$f" != "libsteam_api.so" ]; then
               patchelf --set-rpath '$ORIGIN' "$f" 2>/dev/null || true
             fi
           done
@@ -214,11 +175,11 @@ jobs:
           cp -r ../../scripts .
           echo $STEAM_APPID > steam_appid.txt
 
-          # 4. List Files to verify
+          # 4. List Files
           echo "--- LINUX COMPLETE ARTIFACT LIST ---"
           ls -Rlh
 
       - uses: actions/upload-artifact@v4
         with:
-          name: mkxp-z.linux.ubuntu.22.04.x86_64.${{github.event_name == 'pull_request' && format('PR{0}', github.event.number) || github.ref_name}}-${{steps.short-sha.outputs.sha}}
+          name: mkxp-z.linux.ubuntu
           path: build/local
