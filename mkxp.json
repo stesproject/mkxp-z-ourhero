@@ -9,8 +9,8 @@
         "a": "Interact",
         "b": "Menu",
         "c": "Interact",
-        "x": "Attack",
-        "y": "Jump",
+        "x": "Jump",
+        "y": "Attack",
         "z": "Eat meat",
         "l": "/",
         "r": "Use ability"
