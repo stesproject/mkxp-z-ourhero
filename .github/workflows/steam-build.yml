@@ -2,7 +2,6 @@ name: Steam Build
 
 on:
   push:
-    # Trigger only on these three specific branches
     branches:
       - 'oh-first'
       - 'oh-two'
