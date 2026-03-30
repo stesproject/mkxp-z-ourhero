@@ -2,17 +2,38 @@ name: Steam Build
 
 on:
   push:
+    tags:
+      - 'oh-first/*'
+      - 'oh-two/*'
+      - 'oh-last/*'
     branches: ['dev', 'autobuild']
-    paths-ignore: ['*.md', '*.json', '*.png']
   pull_request:
     branches: ['dev', 'autobuild']
-    paths-ignore: ['*.md', '*.json', '*.png']
 
 jobs:
+  # STEP 1: Identify which game we are building
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      game_env: ${{ steps.get_env.outputs.game_env }}
+    steps:
+      - id: get_env
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            # Extracts "oh-first" from "oh-first/v1.0"
+            TAG_NAME=${{ github.ref_name }}
+            echo "game_env=${TAG_NAME%%/*}" >> $GITHUB_OUTPUT
+          else
+            # Default environment for branch pushes (non-tags)
+            echo "game_env=oh-first" >> $GITHUB_OUTPUT
+          fi
+
   build-windows:
-    name: Windows
+    name: Windows Build
+    needs: setup
     runs-on: windows-latest
-    environment: oh-first
+    # Loads variables (STEAM_APPID) from the identified game environment
+    environment: ${{ needs.setup.outputs.game_env }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -55,107 +76,52 @@ jobs:
         run: |
           source windows/vars.sh
           rm -rf build
-          meson setup build -Denable-https=false -Dsteamworks_path=$PWD/steam_sdk -Dsteam_appid=$STEAM_APPID
+          # Use vars.STEAM_APPID from the Environment
+          meson setup build -Denable-https=false -Dsteamworks_path=$PWD/steam_sdk -Dsteam_appid=${{ vars.STEAM_APPID }}
           cd build
           ninja
-          [ -f ./mkxp-z.exe ] && strip ./mkxp-z.exe || true
-          [ -f ./steam_mkxp-z.exe ] && strip ./steam_mkxp-z.exe || true
+          find . -maxdepth 1 -name "*.exe" -exec strip {} \;
 
       - name: Prepare archive
         shell: msys2 {0}
         run: |
           mkdir -p build/artifact
-          cd build/artifact
+          cp -r build/* build/artifact/ 2>/dev/null || true
           
-          # --- EXPLICIT WINDOWS FILES ---
-          cp ../../build/mkxp-z.exe .
-          cp ../../build/steam_mkxp-z.exe .
+          cd build/artifact
+          rm -rf build.ninja compile_commands.json meson-private meson-logs meson-info *.o *.a artifact
+          
           cp ../../steam_sdk/redistributable_bin/win64/steam_api64.dll .
           cp ../../windows/build-mingw64/bin/x64-msvcrt-ruby310.dll .
-          cp /mingw64/bin/zlib1.dll .
-          echo $STEAM_APPID > steam_appid.txt
           
-          # Ruby StdLib & Scripts
-          cp -r ../../scripts .
           cp -r ../../windows/build-mingw64/lib/ruby/3.1.0 .
           mv ./3.1.0 ./stdlib
+          
+          cp /mingw64/bin/zlib1.dll .
+          cp /mingw64/bin/SDL2.dll .
+          cp /mingw64/bin/libpixman-1-0.dll .
+          cp /mingw64/bin/libexpat-1.dll .
+          
+          cp -r ../../scripts .
+          # Use vars.STEAM_APPID from the Environment
+          echo ${{ vars.STEAM_APPID }} > steam_appid.txt
 
-          echo "--- WINDOWS FILE LIST ---"
+          echo "--- WINDOWS COMPLETE ARTIFACT LIST ---"
           ls -Rlh
 
       - uses: actions/upload-artifact@v4
         with:
-          name: mkxp-z.windows
+          # Names the artifact after the game (e.g., mkxp-z.windows-oh-two)
+          name: mkxp-z.windows-${{ needs.setup.outputs.game_env }}
           path: build/artifact
 
   build-linux-native:
-    name: Ubuntu 22.04 x86_64
+    name: Linux Build
+    needs: setup
     runs-on: ubuntu-22.04
-    environment: oh-first
+    environment: ${{ needs.setup.outputs.game_env }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
 
-      - name: Checkout Private Steam SDK
-        uses: actions/checkout@v5
-        with:
-          repository: stesproject/steam-sdk
-          token: ${{ secrets.SDK_TOKEN }}
-          path: steam_sdk
-
-      - uses: actions/cache@v4
-        with:
-          path: |
-            linux/build-x86_64
-            linux/downloads
-          key: lin-x86_64-${{ hashFiles('linux/Makefile') }}
-
-      - name: Install apt dependencies
-        run: |
-          sudo apt update
-          sudo apt install git wget build-essential cmake meson autoconf automake libtool pkg-config ruby bison xxd zlib1g-dev libbz2-dev xorg-dev libgl1-mesa-dev libasound2-dev libpulse-dev patchelf -y
-
-      - name: Build everything else
-        run: |
-          cd linux
-          rm -rf downloads/x86_64/dbus
-          make
-
-      - name: Build executable
-        run: |
-          source linux/vars.sh
-          rm -rf build
-          meson setup build --bindir=. --prefix=$GITHUB_WORKSPACE/build/local -Denable-https=false -Dsteamworks_path=$PWD/steam_sdk -Dsteam_appid=$STEAM_APPID
-          cd build
-          ninja
-          ninja install || true
-
-      - name: Prepare archive
-        run: |
-          mkdir -p build/local
-          cd build/local
-          
-          # --- EXPLICIT LINUX FILES ---
-          cp ../build/mkxp-z .
-          cp ../build/steam_mkxp-z* . 2>/dev/null || true
-          cp ../../steam_sdk/redistributable_bin/linux64/libsteam_api.so .
-          cp ../../linux/build-x86_64/lib/libruby.so.3.1.3 ./libruby.so.3.1
-          echo $STEAM_APPID > steam_appid.txt
-          
-          # Fix Permissions & RPath
-          chmod +x ./mkxp-z ./steam*
-          patchelf --set-rpath '$ORIGIN' ./mkxp-z
-          patchelf --set-rpath '$ORIGIN' ./steam* 2>/dev/null || true
-          
-          # Assets
-          mkdir -p stdlib
-          cp -r ../../linux/build-x86_64/lib/ruby/3.1.0/* ./stdlib/
-          cp -r ../../scripts .
-
-          echo "--- LINUX FILE LIST ---"
-          ls -Rlh
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: mkxp-z.linux.ubuntu
-          path: build/local
+      - name: Checkout
