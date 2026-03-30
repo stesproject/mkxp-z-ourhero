@@ -8,8 +8,7 @@ on:
     branches: ['dev', 'autobuild']
     paths-ignore: ['*.md', '*.json', '*.png']
 
-env:
-  STEAM_APPID: 847560
+environment: oh-first
 
 jobs:
   build-windows:
@@ -60,40 +59,29 @@ jobs:
           meson setup build -Denable-https=false -Dsteamworks_path=$PWD/steam_sdk -Dsteam_appid=$STEAM_APPID
           cd build
           ninja
-          # Strip any .exe found in the build folder
-          find . -maxdepth 1 -name "*.exe" -exec strip {} \;
+          [ -f ./mkxp-z.exe ] && strip ./mkxp-z.exe || true
+          [ -f ./steam_mkxp-z.exe ] && strip ./steam_mkxp-z.exe || true
 
       - name: Prepare archive
         shell: msys2 {0}
         run: |
           mkdir -p build/artifact
-          
-          # 1. Copy EVERY .exe and .dll produced in the build folder
-          cp build/*.exe build/artifact/ 2>/dev/null || true
-          cp build/*.dll build/artifact/ 2>/dev/null || true
-          
           cd build/artifact
           
-          # 2. Copy the Steam API & Ruby DLL
+          # --- EXPLICIT WINDOWS FILES ---
+          cp ../../build/mkxp-z.exe .
+          cp ../../build/steam_mkxp-z.exe .
           cp ../../steam_sdk/redistributable_bin/win64/steam_api64.dll .
           cp ../../windows/build-mingw64/bin/x64-msvcrt-ruby310.dll .
+          cp /mingw64/bin/zlib1.dll .
+          echo $STEAM_APPID > steam_appid.txt
           
-          # 3. Copy Ruby Environment
+          # Ruby StdLib & Scripts
+          cp -r ../../scripts .
           cp -r ../../windows/build-mingw64/lib/ruby/3.1.0 .
           mv ./3.1.0 ./stdlib
-          
-          # 4. Copy MSYS2 Dependencies (Now these exist because of the 'install' step above)
-          cp /mingw64/bin/zlib1.dll .
-          cp /mingw64/bin/SDL2.dll .
-          cp /mingw64/bin/libpixman-1-0.dll .
-          cp /mingw64/bin/libexpat-1.dll .
-          
-          # 5. Assets
-          cp -r ../../scripts .
-          echo $STEAM_APPID > steam_appid.txt
 
-          # 6. List Files
-          echo "--- WINDOWS COMPLETE ARTIFACT LIST ---"
+          echo "--- WINDOWS FILE LIST ---"
           ls -Rlh
 
       - uses: actions/upload-artifact@v4
@@ -145,38 +133,26 @@ jobs:
       - name: Prepare archive
         run: |
           mkdir -p build/local
-          
-          # 1. Copy binaries but EXCLUDE build.ninja and compile_commands.json
-          # We use '-not -name' to filter out the files you don't want
-          find build -maxdepth 1 -type f \
-            -not -name "*.o" \
-            -not -name "*.a" \
-            -not -name "build.ninja" \
-            -not -name "compile_commands.json" \
-            -exec cp {} build/local/ \; 2>/dev/null || true
-          
           cd build/local
-          chmod +x *
           
-          # 2. Steam API & Ruby Shared Library in Root
+          # --- EXPLICIT LINUX FILES ---
+          cp ../build/mkxp-z .
+          cp ../build/steam_mkxp-z* . 2>/dev/null || true
           cp ../../steam_sdk/redistributable_bin/linux64/libsteam_api.so .
           cp ../../linux/build-x86_64/lib/libruby.so.3.1.3 ./libruby.so.3.1
+          echo $STEAM_APPID > steam_appid.txt
           
-          # 3. RPath Fix for all binaries (skipping the .so files themselves)
-          for f in *; do
-            if [ -f "$f" ] && [ -x "$f" ] && [[ "$f" != *.so* ]]; then
-              patchelf --set-rpath '$ORIGIN' "$f" 2>/dev/null || true
-            fi
-          done
+          # Fix Permissions & RPath
+          chmod +x ./mkxp-z ./steam*
+          patchelf --set-rpath '$ORIGIN' ./mkxp-z
+          patchelf --set-rpath '$ORIGIN' ./steam* 2>/dev/null || true
           
-          # 4. Assets
+          # Assets
           mkdir -p stdlib
           cp -r ../../linux/build-x86_64/lib/ruby/3.1.0/* ./stdlib/
           cp -r ../../scripts .
-          echo $STEAM_APPID > steam_appid.txt
 
-          # 5. List Files to verify they are gone
-          echo "--- LINUX COMPLETE ARTIFACT LIST ---"
+          echo "--- LINUX FILE LIST ---"
           ls -Rlh
 
       - uses: actions/upload-artifact@v4
