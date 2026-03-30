@@ -66,7 +66,8 @@ jobs:
         shell: msys2 {0}
         run: |
           mkdir -p build/artifact
-          cp -r build/* build/artifact/ 2>/dev/null || true
+          cp build/*.exe build/artifact/ 2>/dev/null || true
+          cp build/*.dll build/artifact/ 2>/dev/null || true
           cd build/artifact
           rm -rf build.ninja compile_commands.json meson-private meson-logs meson-info *.o *.a artifact
           cp ../../steam_sdk/redistributable_bin/win64/steam_api64.dll .
@@ -77,7 +78,7 @@ jobs:
           cp /mingw64/bin/SDL2.dll .
           cp /mingw64/bin/libpixman-1-0.dll .
           cp /mingw64/bin/libexpat-1.dll .
-          cp -r ../../scripts .
+          # cp -r ../../scripts .
           echo ${{ vars.STEAM_APPID }} > steam_appid.txt
 
       - uses: actions/upload-artifact@v4
