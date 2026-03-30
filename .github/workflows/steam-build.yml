@@ -124,4 +124,64 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
 
-      - name: Checkout
+      - name: Checkout Private Steam SDK
+        uses: actions/checkout@v5
+        with:
+          repository: stesproject/steam-sdk
+          token: ${{ secrets.SDK_TOKEN }}
+          path: steam_sdk
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            linux/build-x86_64
+            linux/downloads
+          key: lin-x86_64-${{ hashFiles('linux/Makefile') }}
+
+      - name: Install apt dependencies
+        run: |
+          sudo apt update
+          sudo apt install git wget build-essential cmake meson autoconf automake libtool pkg-config ruby bison xxd zlib1g-dev libbz2-dev xorg-dev libgl1-mesa-dev libasound2-dev libpulse-dev patchelf -y
+
+      - name: Build everything else
+        run: |
+          cd linux
+          rm -rf downloads/x86_64/dbus
+          make
+
+      - name: Build executable
+        run: |
+          source linux/vars.sh
+          rm -rf build
+          meson setup build --bindir=. --prefix=$GITHUB_WORKSPACE/build/local -Denable-https=false -Dsteamworks_path=$PWD/steam_sdk -Dsteam_appid=${{ vars.STEAM_APPID }}
+          cd build
+          ninja
+          ninja install || true
+
+      - name: Prepare archive
+        run: |
+          cd build/local
+          rm -f build.ninja compile_commands.json *.o *.a
+          
+          cp ../../steam_sdk/redistributable_bin/linux64/libsteam_api.so .
+          cp ../../linux/build-x86_64/lib/libruby.so.3.1.3 ./libruby.so.3.1
+          
+          chmod +x *
+          for f in *; do
+            if [ -f "$f" ] && [ -x "$f" ] && [[ "$f" != *.so* ]]; then
+              patchelf --set-rpath '$ORIGIN' "$f" 2>/dev/null || true
+            fi
+          done
+          
+          mkdir -p stdlib
+          cp -r ../../linux/build-x86_64/lib/ruby/3.1.0/* ./stdlib/
+          cp -r ../../scripts .
+          echo ${{ vars.STEAM_APPID }} > steam_appid.txt
+
+          echo "--- LINUX COMPLETE ARTIFACT LIST ---"
+          ls -Rlh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mkxp-z.linux-${{ needs.setup.outputs.game_env }}
+          path: build/local
