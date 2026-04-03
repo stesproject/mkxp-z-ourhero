@@ -2,19 +2,42 @@ name: Steam Build
 
 on:
   push:
-    branches:
-      - 'oh-first'
-      - 'oh-two'
-      - 'oh-last'
+    branches: ['dev']
     paths-ignore: ['*.md', '*.json', '*.png']
 
 jobs:
+  # STEP 1: Parse the commit message for a command
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      game_env: ${{ steps.check_msg.outputs.game_env }}
+      should_run: ${{ steps.check_msg.outputs.should_run }}
+    steps:
+      - id: check_msg
+        run: |
+          # Get the last commit message
+          MSG=$(echo "${{ github.event.head_commit.message }}" | tr '[:upper:]' '[:lower:]')
+          
+          if [[ "$MSG" == *"[oh-first]"* ]]; then
+            echo "game_env=oh-first" >> $GITHUB_OUTPUT
+            echo "should_run=true" >> $GITHUB_OUTPUT
+          elif [[ "$MSG" == *"[oh-two]"* ]]; then
+            echo "game_env=oh-two" >> $GITHUB_OUTPUT
+            echo "should_run=true" >> $GITHUB_OUTPUT
+          elif [[ "$MSG" == *"[oh-last]"* ]]; then
+            echo "game_env=oh-last" >> $GITHUB_OUTPUT
+            echo "should_run=true" >> $GITHUB_OUTPUT
+          else
+            echo "should_run=false" >> $GITHUB_OUTPUT
+            echo "No valid game tag ([oh-first], [oh-two], [oh-last]) found in commit message. Skipping build."
+          fi
+
   build-windows:
     name: Windows Build
+    needs: setup
+    if: needs.setup.outputs.should_run == 'true'
     runs-on: windows-latest
-    # This automatically matches the branch name to the GitHub Environment name
-    environment: ${{ github.ref_name }}
-    
+    environment: ${{ needs.setup.outputs.game_env }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -83,13 +106,15 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: mkxp-z.windows-${{ github.ref_name }}
+          name: mkxp-z.windows-${{ needs.setup.outputs.game_env }}
           path: build/artifact
 
   build-linux-native:
     name: Linux Build
+    needs: setup
+    if: needs.setup.outputs.should_run == 'true'
     runs-on: ubuntu-22.04
-    environment: ${{ github.ref_name }}
+    environment: ${{ needs.setup.outputs.game_env }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -147,5 +172,5 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: mkxp-z.linux-${{ github.ref_name }}
+          name: mkxp-z.linux-${{ needs.setup.outputs.game_env }}
           path: build/local
