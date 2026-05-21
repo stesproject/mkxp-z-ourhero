@@ -2,34 +2,39 @@ name: Steam Build
 
 on:
   push:
-    branches: ['dev']
-    paths-ignore: ['*.md', '*.json', '*.png']
+    tags:
+      - '*'                # Trigger on any tag; you can restrict to a pattern like 'v*' or 'oh-*' if desired
 
 jobs:
-  # STEP 1: Parse the commit message for a command
+  # STEP 1: Parse the tag name to determine the game environment
   setup:
     runs-on: ubuntu-latest
     outputs:
-      game_env: ${{ steps.check_msg.outputs.game_env }}
-      should_run: ${{ steps.check_msg.outputs.should_run }}
+      game_env: ${{ steps.check_tag.outputs.game_env }}
+      should_run: ${{ steps.check_tag.outputs.should_run }}
     steps:
-      - id: check_msg
+      - name: Checkout code (to access tag info)
+        uses: actions/checkout@v5
+
+      - id: check_tag
         run: |
-          # Get the last commit message
-          MSG=$(echo "${{ github.event.head_commit.message }}" | tr '[:upper:]' '[:lower:]')
+          # Get the tag name (e.g., "oh-first-v1.0" or "oh-first")
+          TAG_NAME="${{ github.ref_name }}"
+          # Convert to lowercase for case-insensitive matching
+          TAG_LOWER=$(echo "$TAG_NAME" | tr '[:upper:]' '[:lower:]')
           
-          if [[ "$MSG" == *"[oh-first]"* ]]; then
+          if [[ "$TAG_LOWER" == *"oh-first"* ]]; then
             echo "game_env=oh-first" >> $GITHUB_OUTPUT
             echo "should_run=true" >> $GITHUB_OUTPUT
-          elif [[ "$MSG" == *"[oh-two]"* ]]; then
+          elif [[ "$TAG_LOWER" == *"oh-two"* ]]; then
             echo "game_env=oh-two" >> $GITHUB_OUTPUT
             echo "should_run=true" >> $GITHUB_OUTPUT
-          elif [[ "$MSG" == *"[oh-last]"* ]]; then
+          elif [[ "$TAG_LOWER" == *"oh-last"* ]]; then
             echo "game_env=oh-last" >> $GITHUB_OUTPUT
             echo "should_run=true" >> $GITHUB_OUTPUT
           else
             echo "should_run=false" >> $GITHUB_OUTPUT
-            echo "No valid game tag ([oh-first], [oh-two], [oh-last]) found in commit message. Skipping build."
+            echo "No valid game tag ([oh-first], [oh-two], [oh-last]) found in tag name. Skipping build."
           fi
 
   build-windows:
